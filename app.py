@@ -35,9 +35,9 @@ def filter_audience(audience_feature):
 
     # 1. 初始化 NVIDIA API 客户端
     # 优先从系统环境变量读取 NVAPI_KEY，如果没有则请替换为你的明文 Key
-    api_key = os.environ.get("NVAPI_KEY", "你的_NVIDIA_API_KEY")
+    api_key = os.environ.get("NVAPI_KEY", "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")
     
-    if not api_key or api_key == "你的_NVIDIA_API_KEY":
+    if not api_key or api_key == "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":
         print("❌ 警告: 未配置有效的 NVIDIA API Key，触发前端兜底策略。")
         return fallback_response
 
