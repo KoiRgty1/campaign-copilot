@@ -1,100 +1,120 @@
-import streamlit as st
+import os
 import json
-import pandas as pd
+from openai import OpenAI
 
-# ================= 1. 页面 UI 设置 =================
-st.set_page_config(page_title="CRM AI Agent", layout="wide")
-st.title("自动化营销工具") # 已按要求修改标题
-st.markdown("通过自然语言指令，一键实现人群圈选并生成精准触达的营销短信文案。")
+# 假定你的 mock 数据源，为了配合 AI 检索，我们为数据丰富一些底层标签字段
+# 建议在文件顶部或外部定义好 data 数据
+data = [
+    {"user_id": "U2001", "is_new": True, "behavior": "none", "is_promotion_buyer": False},
+    {"user_id": "U2002", "is_new": False, "behavior": "browse", "is_promotion_buyer": False},
+    {"user_id": "U2003", "is_new": False, "behavior": "none", "is_promotion_buyer": True},
+    {"user_id": "U2004", "is_new": True, "behavior": "browse", "is_promotion_buyer": False},
+    {"user_id": "U2005", "is_new": False, "behavior": "browse", "is_promotion_buyer": True},
+]
 
-# ================= 2. 底层数据加载 =================
-@st.cache_data
-def load_data():
-    try:
-        with open("crm_mock_data_50.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-data = load_data()
-
-# ================= 3. 对话历史控制 =================
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# 渲染历史聊天记录（确保刷新时多包结构不乱）
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        if "packages" in message:
-            for pkg in message["packages"]:
-                st.markdown(f"### 📦 独立人群包：{pkg['name']}")
-                st.markdown(f"* **人群包规模**：精确匹配到 {pkg['count']} 位目标用户")
-                st.markdown(f"* **定向营销文案**：\n> {pkg['copy']}")
-                if pkg['count'] > 0:
-                    st.markdown("* **数据快照预览 (前5条)**：")
-                    st.dataframe(pkg['df'])
-                st.markdown("---")
-        else:
-            st.markdown(message["content"])
-
-# ================= 4. 多意图并行圈选引擎 =================
-if prompt := st.chat_input("请输入指令，例如：帮我分别圈选出近2周注册未购和近30天浏览未购人群"):
+def filter_audience(audience_feature):
+    """
+    【AI驱动版本】根据输入的人群特征，通过 NVIDIA Llama-3.2-3b 识别意图并筛选用户。
+    同时支持前端 Fallback 气泡提示策略。
     
-    # 1. 渲染用户输入的 prompt
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    返回格式: 
+    {
+        "status": "success" | "fallback",
+        "message": "提示文本",
+        "suggestions": ["推荐标签1", "推荐标签2"],  # 用于前端气泡
+        "data": [...]                           # 筛选出的用户列表
+    }
+    """
+    # 默认兜底返回结构
+    fallback_response = {
+        "status": "fallback",
+        "message": "没能完全理解您的指令，您是不是想找：",
+        "suggestions": ["近2周新客", "近30天浏览未购"],
+        "data": []
+    }
 
-    # 2. AI 核心解析
-    with st.chat_message("assistant"):
-        st.markdown("🔄 正在解析多意图业务语义，正在并行切分底层数据集...")
-        
-        # 建立独立的人群包存储桶
-        packages_output = []
-        
-        # 【判定桶 1】：检测是否包含“近2周/新客”意图
-        if any(k in prompt for k in ["近2周", "新客", "注册未购"]):
-            users_2w = data[:10]  # 捞取前10条数据
-            packages_output.append({
-                "name": "近2周注册未购新客包",
-                "count": len(users_2w),
-                "copy": "【品牌服务】你好呀！很高兴认识你。看到你最近关注了我们，特意为你准备了一份新人见面礼，期待你的第一次体验。点击[链接]领取专属权益~",
-                "df": pd.DataFrame(users_2w).head(5)
-            })
-            
-        # 【判定桶 2】：检测是否包含“近30天/浏览”意图
-        if any(k in prompt for k in ["近30天", "浏览", "浏览未购"]):
-            users_30d = data[10:20]  # 捞取11-20条数据
-            packages_output.append({
-                "name": "近30天浏览未购意向包",
-                "count": len(users_30d),
-                "copy": "【品牌服务】亲爱的朋友，好久不见。发现你最近在浏览相关商品，你的每一次关注我们都在意。大促回归专属福利已发放到你的账户，来看看吧。[链接]",
-                "df": pd.DataFrame(users_30d).head(5)
-            })
-        
-        # 结果分发渲染
-        if not packages_output:
-            reply = "⚠️ 未能识别到匹配的人群特征，请尝试输入包含 '近2周' 或 '近30天' 的运营指令。"
-            st.markdown(reply)
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-        else:
-            st.markdown("✅ **多包并行圈选完毕，结果已隔离：**")
-            
-            # 遍历并各自渲染独立的人群包区域
-            for pkg in packages_output:
-                st.markdown(f"### 📦 独立人群包：{pkg['name']}")
-                st.markdown(f"* **人群包规模**：精确匹配到 {pkg['count']} 位目标用户")
-                st.markdown(f"* **定向营销文案**：\n> {pkg['copy']}")
-                st.markdown("* **数据快照预览 (前5条)**：")
-                st.dataframe(pkg['df'])
-                st.markdown("---")
-            
-            # 将结构化多包数据存入历史，防止刷新丢失
-            st.session_state.messages.append({
-                "role": "assistant", 
-                "content": "已成功并行生成多个人群包。", 
-                "packages": packages_output
-            })
+    # 1. 初始化 NVIDIA API 客户端
+    # 优先从系统环境变量读取 NVAPI_KEY，如果没有则请替换为你的明文 Key
+    api_key = os.environ.get("NVAPI_KEY", "你的_NVIDIA_API_KEY")
+    
+    if not api_key or api_key == "你的_NVIDIA_API_KEY":
+        print("❌ 警告: 未配置有效的 NVIDIA API Key，触发前端兜底策略。")
+        return fallback_response
 
-# ================= 5. 底部声明小字 =================
-st.caption("智能人群圈选、短信创建")
+    client = OpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=api_key
+    )
+
+    # 2. 构建面向 Slot-Filling 的 System Prompt
+    system_prompt = """
+    你是一个电商数据分析专家。请解析运营人员输入的人群圈选指令，并严格转化为结构化的 JSON 格式。
+    
+    你必须输出且只能输出以下四个字段，不要包含任何 Markdown 格式（如 ```json）或多余解释：
+    - is_new: [true, false, "all"] (提到"新客"、"注册未购"设为 true，否则默认为 "all")
+    - time_range_days: 整数 (如"近2周"为14，"近30天"为30，"近1年"/"进1年"为365，未提到默认为 -1)
+    - behavior: ["browse", "purchase", "all"] (提到"浏览"设为 "browse"，提到"未购"但没提浏览不作为browse，未提到默认为 "all")
+    - is_promotion_buyer: [true, false] (提到"大促"、"活动"、"节假日"设为 true，否则为 false)
+    
+    【重要容错规则】
+    1. 必须具备错别字纠错能力（例如输入"进1年"应等同于"近1年"，将其 time_range_days 解析为 365）。
+    2. 如果输入的文本完全不包含上述任何维度的特征（如输入"哈哈"或"大白菜"），请将所有字段设为 "all" 或 false。
+    """
+
+    try:
+        # 3. 调用 NVIDIA NIM 接口
+        completion = client.chat.completions.create(
+            model="meta/llama-3.2-3b-instruct",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": audience_feature}
+            ],
+            temperature=0.1,  # 降低随机性确保 JSON 格式稳定
+            max_tokens=150
+        )
+        
+        response_text = completion.choices[0].message.content.strip()
+        slots = json.loads(response_text)
+        print(f"💡 [NVIDIA AI 语义解析成功]: {slots}")
+
+        # 4. 判断是否完全没有匹配到任何有效特征（触发 Fallback 条件 1）
+        is_empty_intent = (
+            slots.get("is_new") == "all" and 
+            slots.get("time_range_days") == -1 and 
+            slots.get("behavior") == "all" and 
+            slots.get("is_promotion_buyer") is False
+        )
+        
+        if is_empty_intent:
+            return fallback_response
+
+        # 5. 根据大模型解析出的槽位（Slots）过滤本地 mock 数据（遵守原去重规则）[cite: 2]
+        filtered_users = []
+        for user in data:
+            if slots["is_new"] != "all" and user.get("is_new") != slots["is_new"]:
+                continue
+            if slots["behavior"] != "all" and user.get("behavior") != slots["behavior"]:
+                continue
+            if slots["is_promotion_buyer"] and not user.get("is_promotion_buyer"):
+                continue
+            # 注：此处未强制绑定具体天数逻辑，可根据实际 data 的 date 字段进一步扩充过滤
+            filtered_users.append(user)
+
+        # 6. 按 user_id 去重机制[cite: 2]
+        unique_users = {}
+        for user in filtered_users:
+            user_id = user.get("user_id")[cite: 2]
+            if user_id:[cite: 2]
+                unique_users[user_id] = user[cite: 2]
+        
+        return {
+            "status": "success",
+            "message": "圈选成功",
+            "suggestions": [],
+            "data": list(unique_users.values())[cite: 2]
+        }
+
+    except Exception as e:
+        # 7. API 报错或 JSON 解析异常拦截（触发 Fallback 条件 2）
+        print(f"❌ AI 解析失败或发生异常: {e}")
+        return fallback_response
