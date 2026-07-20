@@ -111,7 +111,7 @@ def filter_audience(audience_feature):
 # 🛠️ STREAMLIT 前端 UI 渲染部分（为你补齐的代码）
 # ==========================================
 
-st.title("🎯 AI 驱动的智能运营人群圈选系统")
+st.title("AI驱动的智能营销系统，一键实现人群圈选、营销短信文案")
 st.caption("基于 NVIDIA NIM (Llama-3.2-3b-instruct) 语义解析架构")
 st.markdown("---")
 
