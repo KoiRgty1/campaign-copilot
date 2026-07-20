@@ -3,7 +3,7 @@ import json
 import streamlit as st
 from openai import OpenAI
 
-# 1. 初始化页面配置（必须放在 Streamlit 代码的最顶部）
+# 1. 初始化页面配置
 st.set_page_config(page_title="AI 运营人群圈选助手", layout="wide")
 
 # ==========================================
@@ -68,20 +68,19 @@ def filter_audience(audience_feature):
     try:
         client = get_ai_client()
         
-        # 💡 重构高智商 System Prompt：让大模型充当路由器，直接映射到你的假数据分类标签上
         system_prompt = """
-        你是一个数据分析专家。请根据运营人员输入的人群圈选指令，判断它最符合以下哪一种既定的受众特征。
+        你是一个数据分析专家。请根据运营人员输入的人群圈选指令，判断它最符合以下哪一种既定的受众特征分类。
+        你必须且只能输出这四个分类标签的其中一个，不要包含任何 Markdown 格式（如星号、```等），也不要回答任何废话。
         
         【可选分类标签】：
-        1. "近2周注册未购" (当提到新客、近两周、新注册且未购买时)
-        2. "近30天浏览未购" (当提到近30天、近1个月、进1年、浏览了但没买时)
-        3. "近1年活跃用户" (当提到近1年活跃、买过东西的老客时)
-        4. "大促人群" (当提到大促、活动、双十一、618等关键词时)
+        - 近2周注册未购
+        - 近30天浏览未购
+        - 近1年活跃用户
+        - 大促人群
         
-        【严格要求】
-        1. 必须具备极强的容错纠错能力（例如输入"进1年大促人群"归类为"大促人群"；输入"帮我圈选出近30天浏览未购人群"归类为"近30天浏览未购"）。
-        2. 如果输入的文本完全无关（如"哈哈"、"大白菜"），请直接输出 "UNKNOWN"。
-        3. 必须且只能输出上述规定的标签文本或 "UNKNOWN"，不要包含任何 Markdown 格式或多余解释。
+        【判定规则】
+        1. 必须有极强的错别字及错词包容力。如输入"进1年大促人群"归类为"大促人群"；输入"帮我圈选出近30天浏览未购人群"归类为"近30天浏览未购"。
+        2. 如果输入完全无关乱码（如"哈哈"），请输出 UNKNOWN。
         """
 
         completion = client.chat.completions.create(
@@ -91,17 +90,27 @@ def filter_audience(audience_feature):
                 {"role": "user", "content": audience_feature}
             ],
             temperature=0.1,
-            max_tokens=50,
+            max_tokens=30,
             timeout=7.0
         )
         
-        target_label = completion.choices[0].message.content.strip().replace('"', '')
-        print(f"💡 [NVIDIA AI 路由映射成功]: {target_label}")
+        # 💡 【核心修复】：移除任何可能混入的 Markdown 标记、引号、空格或换行
+        raw_label = completion.choices[0].message.content.strip()
+        cleaned_label = raw_label.replace('"', '').replace("'", "").replace("*", "").replace("`", "").strip()
+        print(f"💡 [NVIDIA AI 吐出的原始文本]: {repr(raw_label)}")
+        print(f"💡 [清洗后的解析标签]: {repr(cleaned_label)}")
 
-        if target_label == "UNKNOWN" or target_label not in ["近2周注册未购", "近30天浏览未购", "近1年活跃用户", "大促人群"]:
+        # 💡 【模糊匹配兜底】：防止大模型吐出“根据判断，应归为：近30天浏览未购”这种长句子
+        target_label = None
+        for candidate in ["近2周注册未购", "近30天浏览未购", "近1年活跃用户", "大促人群"]:
+            if candidate in cleaned_label:
+                target_label = candidate
+                break
+                
+        if not target_label:
             return fallback_response
 
-        # 根据大模型定下的标签，从假人群包里精准过滤出全量 10 条数据
+        # 精准切分底层对应的 10 条数据
         filtered_users = [user for user in data if user.get("_mock_label") == target_label]
 
         return {
@@ -119,19 +128,19 @@ def generate_sms_copies(intent_label):
     try:
         client = get_ai_client()
         prompt = f"""
-        你是一个资集的电商文案大师。请为被标记为“{intent_label}”的目标受众撰写 5 条极具吸引力的营销短信文案。
+        你是一个资深的电商营销专家。请为购买偏好特征为“{intent_label}”的精准用户，撰写 5 条极具诱惑力、极富催单效果的促销短信文案。
         
-        【严格要求】
-        1. 必须完全严格遵循以下短信模板格式：
-           【品牌名】文案内容 链接：xxxx
-        2. 针对受众特征量身定做（例如：针对“近30天浏览未购”突出购物车宝贝催单、限时优惠券发放）。
-        3. 必须输出且只能输出 5 条，每条占独立的一行。不要包含序号（如 1., 2.），不要有任何额外解释。
+        【格式规范】
+        每一条文案必须严格使用以下模板（包含方括号的品牌名，并以链接结尾）：
+        【品牌名】文案内容 链接：xxxx
+        
+        请注意：直接输出 5 条文案，每条占独立的一行。不要写任何序号（例如不要写 1. 2.），也不要有任何开头介绍或结尾客套话。
         """
 
         completion = client.chat.completions.create(
             model="meta/llama-3.2-3b-instruct",
             messages=[
-                {"role": "system", "content": "你是一个专业的电商短文案助手。"},
+                {"role": "system", "content": "你是一个只输出规定模板短信的电商运营小秘书。"},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
@@ -140,16 +149,26 @@ def generate_sms_copies(intent_label):
         )
         
         raw_output = completion.choices[0].message.content.strip()
-        copies = [line.strip() for line in raw_output.split('\n') if line.strip()]
+        # 清洗掉可能带出来的乱七八糟序号
+        lines = raw_output.split('\n')
+        copies = []
+        for line in lines:
+            line_str = line.strip()
+            if not line_str: continue
+            # 滤除类似 "1. " 或 "1、" 的行首前缀
+            if line_str[0].isdigit() and len(line_str) > 2 and line_str[1] in ['.', '、', ' ']:
+                line_str = line_str[2:].strip()
+            copies.append(line_str)
+            
         return copies[:5]
     except Exception as e:
         print(f"❌ 文案生成失败: {e}")
         return [
-            "【智能选品】您关注的心仪好物正在限时秒杀中，特惠不容错过！ 链接：xxxx",
-            "【运营专享】专属于您的超级优惠券已到账，点击进入立即立减！ 链接：xxxx",
-            "【加码福利】购物车宝贝正在对您恋恋不舍，点击一键清空享好礼！ 链接：xxxx",
-            "【心动狂欢】大促惊喜加码！限时满减爆款低至5折，戳链接抢购！ 链接：xxxx",
-            "【回馈尊享】您有一份精选好物待查收，点击直达尊享老客特权！ 链接：xxxx"
+            "【甄选好物】您关注的心仪商品正在限时特惠，购物车满减活动今晚截止，速戳！ 链接：xxxx",
+            "【限时秒杀】专属您的惊喜回馈礼券已到账！点击进入挑选爆款立减！ 链接：xxxx",
+            "【粉丝福利】您心心念念的宝贝库又有新动作啦！点击一键领取粉丝限时特价 链接：xxxx",
+            "【狂欢加码】错过等一年！全场商品低至5折起，点击链接直达狂欢会场抢购 链接：xxxx",
+            "【老客特权】感谢一路相伴，特为您申请的保价权益已生效，戳链接速查 链接：xxxx"
         ]
 
 # ==========================================
@@ -166,8 +185,11 @@ if "sms_generated" not in st.session_state: st.session_state["sms_generated"] = 
 if "sms_copies" not in st.session_state: st.session_state["sms_copies"] = []
 
 def click_tag(tag_text):
-    st.session_state["input_val"] = tag_text
-    st.session_state["api_result"] = filter_audience(tag_text)
+    # 将快捷推荐标签转换成系统能映射的标准词，保证气泡点击绝对成功
+    mapping = {"近2周新客": "近2周注册未购", "近30天浏览未购": "近30天浏览未购"}
+    query_text = mapping.get(tag_text, tag_text)
+    st.session_state["input_val"] = query_text
+    st.session_state["api_result"] = filter_audience(query_text)
     st.session_state["sms_generated"] = False 
 
 # 输入区
@@ -206,7 +228,7 @@ if st.session_state["api_result"]:
         st.success(f"✅ {result['message']}！共圈选出 {len(result['data'])} 条符合特征的用户数据。")
         st.dataframe(result["data"], use_container_width=True)
         
-        # 💡 主动触发多轮营销对话
+        # 多轮闭环营销问询
         st.markdown("---")
         st.subheader("🤖 AI 营销助理主动触达")
         st.info("📊 **检测到当前人群包已成功导出。需要我帮您为该人群生成专属的营销短信文案吗？**")
