@@ -128,40 +128,50 @@ def generate_sms_copies(intent_label):
     try:
         client = get_ai_client()
         
-        # 针对不同人群做一下大白话翻译，防止 3B 小模型直接把“注册”生硬翻译成 .register
-        human_label = intent_label
-        if "注册未购" in intent_label:
-            human_label = "刚注册还没有买过东西的新朋友"
-        elif "浏览未购" in intent_label:
-            human_label = "最近来看过商品但还没下单的准客户"
-        elif "活跃用户" in intent_label:
-            human_label = "经常光顾的老活跃客户"
-        elif "大促" in intent_label:
-            human_label = "喜欢大促凑单的高价值客户"
-
+        # 核心策略映射：将标签直接映射为运营策略，避免模型自我发挥
+        strategy_map = {
+            "近2周注册未购": "【策略：新人转化】强调您的新人专享大额券还未使用，即将过期，建议立即激活下单。",
+            "近30天浏览未购": "【策略：购物车催单】强调您心仪的商品还未下单，且为您准备了专属优惠券，库存紧张请速抢。",
+            "大促人群": "【策略：大促召回】将利益点前置，直接高调宣布大促活动名称与核心优惠力度（如170元满减券包）。",
+            "近1年活跃用户": "【策略：老客关怀】强调这是我们为您准备的诚意满满的老客专享优惠券，感谢您长期以来的陪伴。"
+        }
+        
+        strategy = strategy_map.get(intent_label, "【策略：通用促销】请撰写一条促销文案。")
+        
         prompt = f"""
-        你是一个专门负责撰写高点击率短信的中国本土电商CRM营销专家。
-        请为当前目标受众——【{human_label}】的人群，撰写 5 条极具诱惑力的促销短信文案。
+        你是一个精通中国电商CRM的高级文案专家。请根据以下策略，撰写 3 条风格简洁、逻辑严密的营销短信。
         
-        【🔥死命令-绝对禁令】
-        1. 全文必须全部使用【纯中文】撰写！
-        2. 绝对禁止出现任何英文单词、英文缩写或代码符号（例如：严禁出现 register, .register, redeem, Buy, Click, . 等任何英文或点号）。
-        3. 必须紧扣“{human_label}”这一特定人群的身份进行针对性催单、关怀或发放福利。
+        【目标人群】：{intent_label}
+        【运营策略】：{strategy}
         
-        【严格文案结构模板】
-        每一条文案必须完全遵循以下格式，不能多字少字：
-        【狄卡侬】[利益点或活动主题]！[针对该人群的中文催单或券包福利文案]！超多优惠等你来：xxxxxx 拒收请回复R
+        【绝对规则】
+        1. 必须使用【纯中文】，禁止英文单词、代码点号及任何非中文符号。
+        2. 严格遵循格式：【狄卡侬】[利益点或策略核心]！[针对性催单文案]！超多优惠等你来：xxxxxx 拒收请回复R
+        3. 每条文案必须紧扣上方定义的【运营策略】。
         
-        【不同营销活动切入点】
-        你需要用 5 种不同的营销钩子包装这 5 条文案：年中狂欢、限时满减、专享无门槛券、限时秒杀、新人/专属好礼。
-        
-        【完美案例参考】
-        - 【狄卡侬】年中狂欢福利来袭！刚注册的新客专享170元满减券包限时领！超多优惠等你来：xxxxxx 拒收请回复R
-        - 【狄卡侬】限时秒杀好物降价！您购物车里心仪的宝贝专属特惠津贴已到账！超多优惠等你来：xxxxxx 拒收请回复R
-        
-        【输出规范】
-        直接输出 5 条纯中文文案，每条占独立的一行。绝对不要写任何数字序号（如 1. 2.），绝对不要有任何开头介绍或客套解释。
+        【输出要求】
+        直接输出文案，每条占独立一行，不需要任何序号，不需要任何开场白。
         """
+
+        completion = client.chat.completions.create(
+            model="meta/llama-3.2-3b-instruct",
+            messages=[
+                {"role": "system", "content": "你只输出纯中文短信，绝对禁止英文和代码符号。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2, # 进一步降低随机性，确保策略执行到位
+            max_tokens=300
+        )
+        
+        raw_output = completion.choices[0].message.content.strip()
+        # 清理非法字符
+        lines = [line.strip() for line in raw_output.split('\n') if line.strip()]
+        return lines[:3] # 每种策略输出 3 条精选即可
+        
+    except Exception as e:
+        print(f"❌ 文案生成失败: {e}")
+        return ["【品牌活动】活动进行中，点击即享惊喜优惠，超多优惠等你来：xxxxxx 拒收请回复R"]
+
 
         completion = client.chat.completions.create(
             model="meta/llama-3.2-3b-instruct",
