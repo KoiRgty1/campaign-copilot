@@ -1,5 +1,3 @@
-
-code = '''
 import os
 import json
 import streamlit as st
@@ -9,7 +7,7 @@ from openai import OpenAI
 st.set_page_config(page_title="AI 运营人群圈选助手", layout="wide")
 
 # ==========================================
-# 📊 50 条真实假人群包数据
+# 50 条真实假人群包数据
 # ==========================================
 data = [
   {"user_id": "U1001", "registration_date": "2026-07-16", "last_browse_date": "2026-07-14", "browsed_page_type": ["PLP", "PDP"], "total_purchases": 0, "last_purchase_date": None, "purchase_channels": [], "campaign_participation": [], "_mock_label": "近2周注册未购"},
@@ -96,13 +94,11 @@ def filter_audience(audience_feature):
             timeout=7.0
         )
         
-        # 💡 【核心修复】：移除任何可能混入的 Markdown 标记、引号、空格或换行
         raw_label = completion.choices[0].message.content.strip()
         cleaned_label = raw_label.replace('"', '').replace("'", "").replace("*", "").replace("`", "").strip()
-        print(f"💡 [NVIDIA AI 吐出的原始文本]: {repr(raw_label)}")
-        print(f"💡 [清洗后的解析标签]: {repr(cleaned_label)}")
+        print(f"[NVIDIA AI 原始文本]: {repr(raw_label)}")
+        print(f"[清洗后的标签]: {repr(cleaned_label)}")
 
-        # 💡 【模糊匹配兜底】：防止大模型吐出长句子
         target_label = None
         for candidate in ["近2周注册未购", "近30天浏览未购", "近1年活跃用户", "大促人群"]:
             if candidate in cleaned_label:
@@ -112,7 +108,6 @@ def filter_audience(audience_feature):
         if not target_label:
             return fallback_response
 
-        # 精准切分底层对应的 10 条数据
         filtered_users = [user for user in data if user.get("_mock_label") == target_label]
 
         return {
@@ -123,24 +118,15 @@ def filter_audience(audience_feature):
             "parsed_intent": target_label
         }
     except Exception as e:
-        print(f"❌ AI 解析失败: {e}")
+        print(f"AI 解析失败: {e}")
         return fallback_response
 
 
 # ==========================================
-# 🎯 【核心修复】差异化文案生成策略 — 模板化 + AI微调
+# 差异化文案生成策略 — 模板化
 # ==========================================
 
 def generate_sms_copies(intent_label):
-    """
-    根据人群标签，采用【模板化策略】确保文案严格符合运营要求：
-    - 近2周注册未购 → 强调新人券未使用
-    - 近30天浏览未购 → 强调心仪好物未下单 + 送券
-    - 大促人群 → 利益点前置，格式固定
-    - 近1年活跃用户 → 强调老客专享券
-    """
-    
-    # 🎯 策略一：模板化文案（确保核心利益点100%准确）
     templates = {
         "近2周注册未购": [
             "【品牌名】您的新人专享大额券还未使用，即将过期！新会员首单立减50元，立即激活下单享专属优惠：xxxxxx 拒收请回复R",
@@ -172,62 +158,38 @@ def generate_sms_copies(intent_label):
         ]
     }
     
-    # 优先返回模板文案（确保策略100%执行）
     if intent_label in templates:
         return templates[intent_label]
     
-    # 兜底：如果标签异常，用AI生成通用文案
-    try:
-        client = get_ai_client()
-        prompt = f"""
-        你是一个精通中国电商CRM的高级文案专家。请为目标人群撰写 3 条营销短信。
-        【目标人群】：{intent_label}
-        【绝对规则】
-        1. 必须使用【纯中文】，禁止英文单词、代码点号及任何非中文符号。
-        2. 严格遵循格式：【狄卡侬】[利益点或策略核心]！[针对性催单文案]！超多优惠等你来：xxxxxx 拒收请回复R
-        【输出要求】直接输出文案，每条占独立一行，不需要任何序号，不需要任何开场白。
-        """
-        completion = client.chat.completions.create(
-            model="meta/llama-3.2-3b-instruct",
-            messages=[
-                {"role": "system", "content": "你只输出纯中文短信，绝对禁止英文和代码符号。"},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            max_tokens=300
-        )
-        raw_output = completion.choices[0].message.content.strip()
-        lines = [line.strip() for line in raw_output.split('\\n') if line.strip()]
-        return lines[:5]
-    except Exception as e:
-        print(f"❌ 文案生成失败: {e}")
-        return ["【狄卡侬】活动进行中，点击即享惊喜优惠，超多优惠等你来：xxxxxx 拒收请回复R"]
+    return ["【品牌名】活动进行中，点击即享惊喜优惠，超多优惠等你来：xxxxxx 拒收请回复R"]
 
 
 # ==========================================
-# 🛠️ STREAMLIT 前端交互面板
+# STREAMLIT 前端交互面板
 # ==========================================
 
-st.title("🎯 AI 驱动的智能运营人群圈选系统")
-st.caption("基于 NVIDIA NIM (Llama-3.2-3b-instruct) 智能标签映射与文案生成管线")
+st.title("AI 驱动的智能营销系统")
+st.caption("基于 NVIDIA NIM (Llama-3.2-3b-instruct) 智能标签映射与营销短信文案生成工具")
 st.markdown("---")
 
-if "input_val" not in st.session_state: st.session_state["input_val"] = ""
-if "api_result" not in st.session_state: st.session_state["api_result"] = None
-if "sms_generated" not in st.session_state: st.session_state["sms_generated"] = False
-if "sms_copies" not in st.session_state: st.session_state["sms_copies"] = []
+if "input_val" not in st.session_state:
+    st.session_state["input_val"] = ""
+if "api_result" not in st.session_state:
+    st.session_state["api_result"] = None
+if "sms_generated" not in st.session_state:
+    st.session_state["sms_generated"] = False
+if "sms_copies" not in st.session_state:
+    st.session_state["sms_copies"] = []
 
 def click_tag(tag_text):
-    # 将快捷推荐标签转换成系统能映射的标准词，保证气泡点击绝对成功
     mapping = {"近2周新客": "近2周注册未购", "近30天浏览未购": "近30天浏览未购"}
     query_text = mapping.get(tag_text, tag_text)
     st.session_state["input_val"] = query_text
     st.session_state["api_result"] = filter_audience(query_text)
-    st.session_state["sms_generated"] = False 
+    st.session_state["sms_generated"] = False
 
-# 输入区
 audience_input = st.text_input(
-    "请输入您的人群圈选指令：", 
+    "请输入您的人群圈选指令：",
     value=st.session_state["input_val"],
     placeholder="例如：帮我圈选出近30天浏览未购人群",
     key="audience_input_key"
@@ -235,7 +197,7 @@ audience_input = st.text_input(
 
 if audience_input != st.session_state["input_val"]:
     st.session_state["input_val"] = audience_input
-    st.session_state["sms_generated"] = False 
+    st.session_state["sms_generated"] = False
 
 if st.button("开始分析并圈选", type="primary"):
     if st.session_state["input_val"].strip() == "":
@@ -245,55 +207,48 @@ if st.button("开始分析并圈选", type="primary"):
             st.session_state["api_result"] = filter_audience(st.session_state["input_val"])
             st.session_state["sms_generated"] = False
 
-# 展示结果
 if st.session_state["api_result"]:
     result = st.session_state["api_result"]
     
     if result["status"] == "fallback":
-        st.write("") 
-        st.info(f"💡 {result['message']}")
+        st.info(f"{result['message']}")
         cols = st.columns(len(result["suggestions"]) + 4)
         for idx, tag in enumerate(result["suggestions"]):
             with cols[idx]:
-                st.button(f"👉 {tag}", key=f"tag_{idx}", on_click=click_tag, args=(tag,))
+                st.button(f"{tag}", key=f"tag_{idx}", on_click=click_tag, args=(tag,))
                 
     elif result["status"] == "success":
-        st.success(f"✅ {result['message']}！共圈选出 {len(result['data'])} 条符合特征的用户数据。")
+        st.success(f"{result['message']}！共圈选出 {len(result['data'])} 条符合特征的用户数据。")
         st.dataframe(result["data"], use_container_width=True)
         
-        # 多轮闭环营销问询
         st.markdown("---")
-        st.subheader("🤖 AI 营销助理主动触达")
-        st.info("📊 **检测到当前人群包已成功导出。需要我帮您为该人群生成专属的营销短信文案吗？**")
+        st.subheader("AI 营销助理主动触达")
+        st.info("检测到当前人群包已成功导出。需要我帮您为该人群生成专属的营销短信文案吗？")
         
         chat_col, button_col = st.columns([6, 1])
         with chat_col:
-            user_response = st.text_input("您可以回复：\'好的\'、\'是\'、\'需要\' 或直接点右侧按钮", placeholder="好的，帮我写个文案", key="chat_reply_key")
+            user_response = st.text_input(
+                "您可以回复：'好的'、'是'、'需要' 或直接点右侧按钮",
+                placeholder="好的，帮我写个文案",
+                key="chat_reply_key"
+            )
         with button_col:
-            btn_triggered = st.button("🚀 直接生成", type="secondary")
+            btn_triggered = st.button("直接生成", type="secondary")
             
         is_positive_reply = any(k in user_response for k in ["好的", "是", "需要", "要", "ok", "OK", "帮我"]) if user_response else False
         
         if (is_positive_reply or btn_triggered) and not st.session_state["sms_generated"]:
-            with st.spinner("正在根据人群画像特征，使用差异化策略模板生成精准营销文案..."):
+            with st.spinner("正在根据人群画像特征生成精准营销文案..."):
                 copies = generate_sms_copies(result["parsed_intent"])
                 st.session_state["sms_copies"] = copies
                 st.session_state["sms_generated"] = True
                 
-                # 同步向控制台（Console）打印 5 条短信文案
-                print("\\n================== 🚀 AI 生成的 5 条短信文案 ==================")
+                print("\n================== AI 生成的 5 条短信文案 ==================")
                 for i, sms in enumerate(copies, 1):
                     print(f"文案 {i}: {sms}")
-                print("===============================================================\\n")
+                print("===============================================================\n")
 
         if st.session_state["sms_generated"]:
-            st.write("✨ **为您精准定制的 5 条营销短信文案（已按人群策略差异化生成）：**")
+            st.write("为您精准定制的 5 条营销短信文案（已按人群策略差异化生成）：")
             for idx, sms in enumerate(st.session_state["sms_copies"], 1):
                 st.code(sms, language="text")
-'''
-
-with open('/mnt/agents/output/app.py', 'w', encoding='utf-8') as f:
-    f.write(code)
-
-print("✅ 文件已保存到 /mnt/agents/output/app.py")
-print(f"📄 文件大小: {len(code)} 字符")
