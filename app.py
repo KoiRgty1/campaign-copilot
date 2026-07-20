@@ -100,18 +100,18 @@ def filter_audience(audience_feature):
             # 注：此处未强制绑定具体天数逻辑，可根据实际 data 的 date 字段进一步扩充过滤
             filtered_users.append(user)
 
-        # 6. 按 user_id 去重机制[cite: 2]
+# 6. 按 user_id 去重机制
         unique_users = {}
         for user in filtered_users:
-            user_id = user.get("user_id")[cite: 2]
-            if user_id:[cite: 2]
-                unique_users[user_id] = user[cite: 2]
+            user_id = user.get("user_id")
+            if user_id:
+                unique_users[user_id] = user
         
         return {
             "status": "success",
             "message": "圈选成功",
             "suggestions": [],
-            "data": list(unique_users.values())[cite: 2]
+            "data": list(unique_users.values())
         }
 
     except Exception as e:
