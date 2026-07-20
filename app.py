@@ -1,9 +1,12 @@
 import os
 import json
+import streamlit as st
 from openai import OpenAI
 
-# 假定你的 mock 数据源，为了配合 AI 检索，我们为数据丰富一些底层标签字段
-# 建议在文件顶部或外部定义好 data 数据
+# 1. 初始化页面配置（必须放在 Streamlit 代码的最顶部）
+st.set_page_config(page_title="AI 运营人群圈选助手", layout="wide")
+
+# 模拟数据源
 data = [
     {"user_id": "U2001", "is_new": True, "behavior": "none", "is_promotion_buyer": False},
     {"user_id": "U2002", "is_new": False, "behavior": "browse", "is_promotion_buyer": False},
@@ -13,18 +16,6 @@ data = [
 ]
 
 def filter_audience(audience_feature):
-    """
-    【AI驱动版本】根据输入的人群特征，通过 NVIDIA Llama-3.2-3b 识别意图并筛选用户。
-    同时支持前端 Fallback 气泡提示策略。
-    
-    返回格式: 
-    {
-        "status": "success" | "fallback",
-        "message": "提示文本",
-        "suggestions": ["推荐标签1", "推荐标签2"],  # 用于前端气泡
-        "data": [...]                           # 筛选出的用户列表
-    }
-    """
     # 默认兜底返回结构
     fallback_response = {
         "status": "fallback",
@@ -33,51 +24,50 @@ def filter_audience(audience_feature):
         "data": []
     }
 
-    # 1. 初始化 NVIDIA API 客户端
-    # 优先从系统环境变量读取 NVAPI_KEY，如果没有则请替换为你的明文 Key
+    # 优先从环境变量读取，没有则直接使用你提供的明文 Key
     api_key = os.environ.get("NVAPI_KEY", "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")
     
-    if not api_key or api_key == "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":
+    # 【修复硬伤】：只有当没有配置任何 Key 时才拦截
+    if not api_key or api_key.strip() == "":
         print("❌ 警告: 未配置有效的 NVIDIA API Key，触发前端兜底策略。")
         return fallback_response
 
-    client = OpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=api_key
-    )
-
-    # 2. 构建面向 Slot-Filling 的 System Prompt
-    system_prompt = """
-    你是一个电商数据分析专家。请解析运营人员输入的人群圈选指令，并严格转化为结构化的 JSON 格式。
-    
-    你必须输出且只能输出以下四个字段，不要包含任何 Markdown 格式（如 ```json）或多余解释：
-    - is_new: [true, false, "all"] (提到"新客"、"注册未购"设为 true，否则默认为 "all")
-    - time_range_days: 整数 (如"近2周"为14，"近30天"为30，"近1年"/"进1年"为365，未提到默认为 -1)
-    - behavior: ["browse", "purchase", "all"] (提到"浏览"设为 "browse"，提到"未购"但没提浏览不作为browse，未提到默认为 "all")
-    - is_promotion_buyer: [true, false] (提到"大促"、"活动"、"节假日"设为 true，否则为 false)
-    
-    【重要容错规则】
-    1. 必须具备错别字纠错能力（例如输入"进1年"应等同于"近1年"，将其 time_range_days 解析为 365）。
-    2. 如果输入的文本完全不包含上述任何维度的特征（如输入"哈哈"或"大白菜"），请将所有字段设为 "all" 或 false。
-    """
-
     try:
-        # 3. 调用 NVIDIA NIM 接口
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=api_key
+        )
+
+        system_prompt = """
+        你是一个电商数据分析专家。请解析运营人员输入的人群圈选指令，并严格转化为结构化的 JSON 格式。
+        
+        你必须输出且只能输出以下四个字段，不要包含任何 Markdown 格式（如 ```json）或多余解释：
+        - is_new: [true, false, "all"] (提到"新客"、"注册未购"设为 true，否则默认为 "all")
+        - time_range_days: 整数 (如"近2周"为14，"近30天"为30，"近1年"/"进1年"为365，未提到默认为 -1)
+        - behavior: ["browse", "purchase", "all"] (提到"浏览"设为 "browse"，未提到默认为 "all")
+        - is_promotion_buyer: [true, false] (提到"大促"、"活动"、"节假日"设为 true，否则为 false)
+        
+        【重要容错规则】
+        1. 必须具备错别字纠错能力（例如输入"进1年"应等同于"近1年"，将其 time_range_days 解析为 365）。
+        2. 如果输入的文本完全不包含上述任何维度的特征（如输入"哈哈"或"大白菜"），请将所有字段设为 "all" 或 false。
+        """
+
         completion = client.chat.completions.create(
             model="meta/llama-3.2-3b-instruct",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": audience_feature}
             ],
-            temperature=0.1,  # 降低随机性确保 JSON 格式稳定
-            max_tokens=150
+            temperature=0.1,
+            max_tokens=150,
+            timeout=7.0  # 设置超时防止无限死等
         )
         
         response_text = completion.choices[0].message.content.strip()
         slots = json.loads(response_text)
         print(f"💡 [NVIDIA AI 语义解析成功]: {slots}")
 
-        # 4. 判断是否完全没有匹配到任何有效特征（触发 Fallback 条件 1）
+        # 判断是否完全没有匹配到任何有效特征
         is_empty_intent = (
             slots.get("is_new") == "all" and 
             slots.get("time_range_days") == -1 and 
@@ -88,7 +78,7 @@ def filter_audience(audience_feature):
         if is_empty_intent:
             return fallback_response
 
-        # 5. 根据大模型解析出的槽位（Slots）过滤本地 mock 数据（遵守原去重规则）[cite: 2]
+        # 数据过滤逻辑
         filtered_users = []
         for user in data:
             if slots["is_new"] != "all" and user.get("is_new") != slots["is_new"]:
@@ -97,10 +87,9 @@ def filter_audience(audience_feature):
                 continue
             if slots["is_promotion_buyer"] and not user.get("is_promotion_buyer"):
                 continue
-            # 注：此处未强制绑定具体天数逻辑，可根据实际 data 的 date 字段进一步扩充过滤
             filtered_users.append(user)
 
-# 6. 按 user_id 去重机制
+        # 按 user_id 去重机制
         unique_users = {}
         for user in filtered_users:
             user_id = user.get("user_id")
@@ -115,6 +104,67 @@ def filter_audience(audience_feature):
         }
 
     except Exception as e:
-        # 7. API 报错或 JSON 解析异常拦截（触发 Fallback 条件 2）
         print(f"❌ AI 解析失败或发生异常: {e}")
         return fallback_response
+
+# ==========================================
+# 🛠️ STREAMLIT 前端 UI 渲染部分（为你补齐的代码）
+# ==========================================
+
+st.title("🎯 AI 驱动的智能运营人群圈选系统")
+st.caption("基于 NVIDIA NIM (Llama-3.2-3b-instruct) 语义解析架构")
+st.markdown("---")
+
+# 初始化 Streamlit 的 Session State，用于处理点击气泡时的输入框文本联动
+if "input_val" not in st.session_state:
+    st.session_state["input_val"] = ""
+if "api_result" not in st.session_state:
+    st.session_state["api_result"] = None
+
+# 定义点击推荐标签时的回调事件
+def click_tag(tag_text):
+    st.session_state["input_val"] = tag_text
+    # 自动执行查询
+    st.session_state["api_result"] = filter_audience(tag_text)
+
+# 用户输入区
+audience_input = st.text_input(
+    "请输入您的人群圈选指令：", 
+    value=st.session_state["input_val"],
+    placeholder="例如：帮我圈选出进1年大促人群 / 近30天浏览未购客群",
+    key="audience_input_key"
+)
+
+# 当用户手动打字输入更新时，同步更新状态
+if audience_input != st.session_state["input_val"]:
+    st.session_state["input_val"] = audience_input
+
+if st.button("开始分析并圈选", type="primary"):
+    if st.session_state["input_val"].strip() == "":
+        st.warning("请输入指令后再提交哦！")
+    else:
+        with st.spinner("AI 正在解析多意图业务语义并切分底层数据集..."):
+            st.session_state["api_result"] = filter_audience(st.session_state["input_val"])
+
+# 展示区
+if st.session_state["api_result"]:
+    result = st.session_state["api_result"]
+    
+    # 💡 核心亮点：当前端收到 fallback 状态时的交互优化策略
+    if result["status"] == "fallback":
+        st.write("") # 留空增加视觉间隔
+        # 用 info 气泡展示友好提示
+        st.info(f"💡 {result['message']}")
+        
+        # 横向并排渲染可点击的推荐标签按钮
+        cols = st.columns(len(result["suggestions"]) + 4)
+        for idx, tag in enumerate(result["suggestions"]):
+            with cols[idx]:
+                st.button(f"👉 {tag}", key=f"tag_{idx}", on_click=click_tag, args=(tag,))
+                
+    elif result["status"] == "success":
+        st.success(f"✅ {result['message']}！共圈选出 {len(result['data'])} 条符合特征的用户数据。")
+        if len(result["data"]) > 0:
+            st.dataframe(result["data"], use_container_width=True)
+        else:
+            st.info("大模型已成功解析标签，但当前数据库中未检索到完全匹配此特征的用户。")
