@@ -60,7 +60,7 @@ def filter_audience(audience_feature):
     fallback_response = {
         "status": "fallback",
         "message": "没能完全理解您的指令，您是不是想找：",
-        "suggestions": ["近2周新客", "近30天浏览未购"],
+        "suggestions": ["近2周注册未购", "近30天浏览未购"],
         "data": [],
         "parsed_intent": "未知"
     }
@@ -69,18 +69,12 @@ def filter_audience(audience_feature):
         client = get_ai_client()
         
         system_prompt = """
-        你是一个数据分析专家。请根据运营人员输入的人群圈选指令，判断它最符合以下哪一种既定的受众特征分类。
-        你必须且只能输出这四个分类标签的其中一个，不要包含任何 Markdown 格式（如星号、```等），也不要回答任何废话。
-        
-        【可选分类标签】：
+        你是一个数据分析专家。请根据用户输入，将其归类为以下四个标签之一：
         - 近2周注册未购
         - 近30天浏览未购
         - 近1年活跃用户
         - 大促人群
-        
-        【判定规则】
-        1. 必须有极强的错别字及错词包容力。如输入"进1年大促人群"归类为"大促人群"；输入"帮我圈选出近30天浏览未购人群"归类为"近30天浏览未购"。
-        2. 如果输入完全无关乱码（如"哈哈"），请输出 UNKNOWN。
+        请直接输出标签名，不要包含任何标点、符号或多余解释。
         """
 
         completion = client.chat.completions.create(
@@ -90,29 +84,31 @@ def filter_audience(audience_feature):
                 {"role": "user", "content": audience_feature}
             ],
             temperature=0.1,
-            max_tokens=30,
-            timeout=7.0
+            max_tokens=20
         )
         
-        # 核心修复：移除任何可能混入的 Markdown 标记、引号、空格或换行
         raw_label = completion.choices[0].message.content.strip()
-        cleaned_label = raw_label.replace('"', '').replace("'", "").replace("*", "").replace("`", "").strip()
-        print(f"💡 [NVIDIA AI 吐出的原始文本]: {repr(raw_label)}")
-        print(f"💡 [清洗后的解析标签]: {repr(cleaned_label)}")
-
-        # 模糊匹配兜底：防止大模型吐出长句子
+        # 关键词映射逻辑，确保即便AI输出不规范也能精准匹配
+        mapping = {
+            "2周": "近2周注册未购",
+            "注册": "近2周注册未购",
+            "30天": "近30天浏览未购",
+            "浏览": "近30天浏览未购",
+            "1年": "近1年活跃用户",
+            "活跃": "近1年活跃用户",
+            "大促": "大促人群"
+        }
+        
         target_label = None
-        for candidate in ["近2周注册未购", "近30天浏览未购", "近1年活跃用户", "大促人群"]:
-            if candidate in cleaned_label:
-                target_label = candidate
+        for key, value in mapping.items():
+            if key in raw_label or key in audience_feature:
+                target_label = value
                 break
                 
         if not target_label:
             return fallback_response
 
-        # 精准切分底层对应的 10 条数据
         filtered_users = [user for user in data if user.get("_mock_label") == target_label]
-
         return {
             "status": "success",
             "message": f"成功匹配标签群包【{target_label}】",
@@ -123,7 +119,6 @@ def filter_audience(audience_feature):
     except Exception as e:
         print(f"❌ AI 解析失败: {e}")
         return fallback_response
-
 
 # ==========================================
 # 差异化文案生成策略 — 模板化（只改这里）
