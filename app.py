@@ -171,88 +171,50 @@ def generate_sms_copies(intent_label):
 
 
 # ==========================================
-# STREAMLIT 前端交互面板（完全不动）
+# STREAMLIT 前端交互面板
 # ==========================================
+st.title("智能营销助手 实现精准触达")
 
-st.title("🎯 AI 驱动的智能运营人群圈选系统")
-st.caption("基于 NVIDIA NIM (Llama-3.2-3b-instruct) 智能标签映射与文案生成管线")
-st.markdown("---")
+# 初始化会话状态
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-if "input_val" not in st.session_state: st.session_state["input_val"] = ""
-if "api_result" not in st.session_state: st.session_state["api_result"] = None
-if "sms_generated" not in st.session_state: st.session_state["sms_generated"] = False
-if "sms_copies" not in st.session_state: st.session_state["sms_copies"] = []
-
-def click_tag(tag_text):
-    # 将快捷推荐标签转换成系统能映射的标准词，保证气泡点击绝对成功
-    mapping = {"近2周新客": "近2周注册未购", "近30天浏览未购": "近30天浏览未购"}
-    query_text = mapping.get(tag_text, tag_text)
-    st.session_state["input_val"] = query_text
-    st.session_state["api_result"] = filter_audience(query_text)
-    st.session_state["sms_generated"] = False 
-
-# 输入区
-audience_input = st.text_input(
-    "请输入您的人群圈选指令：", 
-    value=st.session_state["input_val"],
-    placeholder="例如：帮我圈选出近30天浏览未购人群",
-    key="audience_input_key"
-)
-
-if audience_input != st.session_state["input_val"]:
-    st.session_state["input_val"] = audience_input
-    st.session_state["sms_generated"] = False 
-
-if st.button("开始分析并圈选", type="primary"):
-    if st.session_state["input_val"].strip() == "":
-        st.warning("请输入指令后再提交哦！")
-    else:
-        with st.spinner("AI 正在解析多意图业务语义并切分底层数据集..."):
-            st.session_state["api_result"] = filter_audience(st.session_state["input_val"])
-            st.session_state["sms_generated"] = False
-
-# 展示结果
-if st.session_state["api_result"]:
-    result = st.session_state["api_result"]
-    
-    if result["status"] == "fallback":
-        st.write("") 
-        st.info(f"💡 {result['message']}")
-        cols = st.columns(len(result["suggestions"]) + 4)
-        for idx, tag in enumerate(result["suggestions"]):
-            with cols[idx]:
-                st.button(f"👉 {tag}", key=f"tag_{idx}", on_click=click_tag, args=(tag,))
-                
-    elif result["status"] == "success":
-        st.success(f"✅ {result['message']}！共圈选出 {len(result['data'])} 条符合特征的用户数据。")
-        st.dataframe(result["data"], use_container_width=True)
-        
-        # 多轮闭环营销问询
-        st.markdown("---")
-        st.subheader("🤖 AI 营销助理主动触达")
-        st.info("📊 **检测到当前人群包已成功导出。需要我帮您为该人群生成专属的营销短信文案吗？**")
-        
-        chat_col, button_col = st.columns([6, 1])
-        with chat_col:
-            user_response = st.text_input("您可以回复：'好的'、'是'、'需要' 或直接点右侧按钮", placeholder="好的，帮我写个文案", key="chat_reply_key")
-        with button_col:
-            btn_triggered = st.button("🚀 直接生成", type="secondary")
-            
-        is_positive_reply = any(k in user_response for k in ["好的", "是", "需要", "要", "ok", "OK", "帮我"]) if user_response else False
-        
-        if (is_positive_reply or btn_triggered) and not st.session_state["sms_generated"]:
-            with st.spinner("正在根据人群画像特征，使用差异化策略模板生成精准营销文案..."):
-                copies = generate_sms_copies(result["parsed_intent"])
-                st.session_state["sms_copies"] = copies
-                st.session_state["sms_generated"] = True
-                
-                # 同步向控制台（Console）打印 5 条短信文案
-                print("\n================== 🚀 AI 生成的 5 条短信文案 ==================")
-                for i, sms in enumerate(copies, 1):
-                    print(f"文案 {i}: {sms}")
-                print("===============================================================\n")
-
-        if st.session_state["sms_generated"]:
-            st.write("✨ **为您精准定制的 5 条营销短信文案（已按人群策略差异化生成）：**")
-            for idx, sms in enumerate(st.session_state["sms_copies"], 1):
+# 1. 展示历史对话
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if "data" in msg:
+            st.dataframe(msg["data"], use_container_width=True)
+        if "sms" in msg:
+            for sms in msg["sms"]:
                 st.code(sms, language="text")
+
+# 2. 底部对话输入
+if prompt := st.chat_input("输入人群圈选指令，或回复“帮我写文案”"):
+    # 用户输入处理
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # AI 响应逻辑
+    with st.chat_message("assistant"):
+        # 模式 A: 生成文案请求
+        if any(k in prompt for k in ["文案", "写", "生成"]) and "last_intent" in st.session_state:
+            with st.spinner("正在生成文案..."):
+                copies = generate_sms_copies(st.session_state["last_intent"])
+                st.markdown("✨ 为您定制的营销文案：")
+                for sms in copies: st.code(sms, language="text")
+                st.session_state.messages.append({"role": "assistant", "content": "这是为您生成的文案：", "sms": copies})
+        
+        # 模式 B: 圈选人群请求
+        else:
+            with st.spinner("AI 正在解析..."):
+                result = filter_audience(prompt)
+                st.markdown(result["message"])
+                
+                if result["status"] == "success":
+                    st.dataframe(result["data"], use_container_width=True)
+                    st.session_state["last_intent"] = result["parsed_intent"]
+                    st.session_state.messages.append({"role": "assistant", "content": result["message"], "data": result["data"]})
+                else:
+                    st.session_state.messages.append({"role": "assistant", "content": result["message"]})
